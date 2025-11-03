@@ -1,0 +1,78 @@
+Param(
+    [string]$ZipUrl = "https://10.3423.100/public-archives/download/IIS2019/IIS10_2019.zip",
+    [int]$MinFreeGb = 100
+)
+
+function Throw-Error($Message) {
+    Write-Error $Message
+    exit 1
+}
+
+try {
+    Write-Host "Validating D: drive and free space..." -ForegroundColor Cyan
+
+    $dDrive = Get-PSDrive -Name 'D' -ErrorAction SilentlyContinue
+    if (-not $dDrive) {
+        Throw-Error "D: drive not found. Please attach or mount a D: volume."
+    }
+
+    $freeGb = [math]::Round(($dDrive.Free / 1GB), 2)
+    if ($freeGb -lt $MinFreeGb) {
+        Throw-Error "Insufficient free space on D:. Required: $MinFreeGb GB, Available: $freeGb GB."
+    }
+
+    Write-Host "D: drive found with $freeGb GB free (>= $MinFreeGb GB required)." -ForegroundColor Green
+
+    # Prepare directories on D:
+    $baseDir = 'D:\iis'
+    $downloadDir = 'D:\IIS'
+    $null = New-Item -Path $baseDir -ItemType Directory -Force -ErrorAction Stop
+    $null = New-Item -Path $downloadDir -ItemType Directory -Force -ErrorAction Stop
+
+    # Download ZIP (bypass cert validation for internal/self-signed endpoints)
+    $zipPath = Join-Path $downloadDir 'IIS10_2019.zip'
+    $extractDir = 'D:\IIS10_2019'
+
+    Write-Host "Downloading ZIP from: $ZipUrl" -ForegroundColor Yellow
+    $prevCallback = [System.Net.ServicePointManager]::ServerCertificateValidationCallback
+    [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
+    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
+    try {
+        Invoke-WebRequest -Uri $ZipUrl -OutFile $zipPath -UseBasicParsing -ErrorAction Stop
+    }
+    finally {
+        [System.Net.ServicePointManager]::ServerCertificateValidationCallback = $prevCallback
+    }
+    Write-Host "Downloaded to: $zipPath" -ForegroundColor Green
+
+    Write-Host "Extracting ZIP to: $extractDir" -ForegroundColor Yellow
+    if (Test-Path $extractDir) { Remove-Item -Path $extractDir -Recurse -Force -ErrorAction SilentlyContinue }
+    Expand-Archive -LiteralPath $zipPath -DestinationPath $extractDir -Force
+    Write-Host "Extraction complete." -ForegroundColor Green
+
+    # Copy this folder's contents (dependent files) to D:\iis
+    $sourceDir = $PSScriptRoot
+    if (-not (Test-Path $sourceDir)) { Throw-Error "Cannot resolve script root for dependency copy." }
+
+    Write-Host "Copying scripts and dependencies from '$sourceDir' to '$baseDir'..." -ForegroundColor Yellow
+    robocopy "$sourceDir" "$baseDir" *.* /E /NFL /NDL /NJH /NJS /NP | Out-Null
+    Write-Host "Copy complete." -ForegroundColor Green
+
+    $installScript = Join-Path $baseDir 'install-iis10-script.ps1'
+    if (-not (Test-Path $installScript)) {
+        Throw-Error "Missing '$installScript'. Ensure your installer script exists in the repository under files/iis/."
+    }
+
+    Write-Host "Launching installer as Administrator: $installScript" -ForegroundColor Cyan
+    $args = "-ExecutionPolicy Bypass -NoProfile -File `"$installScript`""
+    Start-Process -FilePath "powershell.exe" -Verb RunAs -ArgumentList $args -Wait
+
+    Write-Host "Bootstrap completed successfully." -ForegroundColor Cyan
+    exit 0
+}
+catch {
+    Write-Error $_
+    exit 1
+}
+
+
