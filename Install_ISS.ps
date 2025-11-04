@@ -10,7 +10,7 @@ try {
     [int]$MinFreeGb = 100
     Write-Host "Validating D: drive and free space..." -ForegroundColor Cyan
 
-    $dDrive = Get-PSDrive -Name 'D' -ErrorAction SilentlyContinue
+    $dDrive = Get-PSDrive -Name 'E' -ErrorAction SilentlyContinue
     if (-not $dDrive) {
         Throw-Error "D: drive not found. Please attach or mount a D: volume."
     }
@@ -23,14 +23,14 @@ try {
     Write-Host "D: drive found with $freeGb GB free (>= $MinFreeGb GB required)." -ForegroundColor Green
 
     # Prepare directories on D:
-    $baseDir = 'D:\iis'
-    $downloadDir = 'D:\IIS'
+    $baseDir = 'E:\iis'
+    $downloadDir = 'E:\IIS'
     $null = New-Item -Path $baseDir -ItemType Directory -Force -ErrorAction Stop
     $null = New-Item -Path $downloadDir -ItemType Directory -Force -ErrorAction Stop
 
     # Download ZIP (bypass cert validation for internal/self-signed endpoints)
     $zipPath = Join-Path $downloadDir 'IIS10_2019.zip'
-    $extractDir = 'D:\IIS10_2019'
+    $extractDir = 'E:\IIS10_2019'
 
     Write-Host "Downloading ZIP from: $ZipUrl" -ForegroundColor Yellow
     $prevCallback = [System.Net.ServicePointManager]::ServerCertificateValidationCallback
