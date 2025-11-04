@@ -25,7 +25,7 @@ try {
     Write-Host "$TargetDrive drive found with $freeGb GB free (>= $MinFreeGb GB required)." -ForegroundColor Green
 
     # Prepare directories on target drive
-    $driveRoot = ("{0}\" -f ($TargetDrive.TrimEnd(':','\')))
+    $driveRoot = $targetPsDrive.Root
     $baseDir = Join-Path $driveRoot 'iis'
     $downloadDir = Join-Path $driveRoot 'IIS'
 
@@ -85,8 +85,9 @@ try {
         catch {
             Write-Warning ("BITS download failed. Error: {0}" -f $_.Exception.Message)
             # Final fallback: curl.exe with -k -L (ignore cert errors, follow redirects)
-            $curlCmd = (Get-Command curl.exe -ErrorAction SilentlyContinue)?.Source
-            if (-not $curlCmd) { $curlCmd = "C:\\Windows\\System32\\curl.exe" }
+            $curlCmd = $null
+            $curlCmdInfo = Get-Command curl.exe -ErrorAction SilentlyContinue
+            if ($curlCmdInfo) { $curlCmd = $curlCmdInfo.Source } else { $curlCmd = "C:\\Windows\\System32\\curl.exe" }
             if (Test-Path -LiteralPath $curlCmd) {
                 Write-Host ("Attempting curl fallback: '{0}'" -f $curlCmd) -ForegroundColor Yellow
                 $curlArgs = @('-k','-L',"$ZipUrl",'-o',"$zipPath")
