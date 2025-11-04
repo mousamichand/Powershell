@@ -26,8 +26,8 @@ try {
 
     # Prepare directories on target drive
     $driveRoot = $targetPsDrive.Root
-    $baseDir = Join-Path $driveRoot 'iis'
-    $downloadDir = Join-Path $driveRoot 'IIS'
+    $baseDir = Join-Path $driveRoot 'IIS'
+    $downloadDir = Join-Path $driveRoot 'IIS_Download'
 
     # Validate that paths are legal before use
     foreach ($p in @($baseDir, $downloadDir)) {
@@ -121,8 +121,8 @@ try {
     }
     Write-Host "Extraction complete." -ForegroundColor Green
 
-    # Copy this folder's contents (dependent files) to D:\iis
-    $sourceDir = $PSScriptRoot
+    # Copy this folder's contents (dependent files).
+    $sourceDir = $extractDir
     if ([string]::IsNullOrWhiteSpace($sourceDir)) {
         $sourceDir = Split-Path -Parent -Path $MyInvocation.MyCommand.Path
     }
@@ -134,7 +134,7 @@ try {
 
     $installScript = Join-Path $baseDir 'install-iis10-script.ps1'
     if (-not (Test-Path $installScript)) {
-        Throw-Error "Missing '$installScript'. Ensure your installer script exists in the repository under files/iis/."
+        Throw-Error "Missing '$installScript'. Ensure your installer script exists"
     }
 
     Write-Host "Launching installer as Administrator: $installScript" -ForegroundColor Cyan
