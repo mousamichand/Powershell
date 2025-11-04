@@ -6,7 +6,7 @@ function Throw-Error($Message) {
 }
 
 try {
-    [string]$ZipUrl = "https://10.32.20.128/public-archives/download/IIS2019/IIS10_2019.zip"
+    [string]$ZipUrl = "https://10.32.20.128/public-archives/download/IIS2019/IIS10_2019.zip",
     [int]$MinFreeGb = 50
     Write-Host "Validating D: drive and free space..." -ForegroundColor Cyan
 
@@ -25,33 +25,87 @@ try {
     # Prepare directories on D:
     $baseDir = 'E:\iis'
     $downloadDir = 'E:\IIS'
+
+    # Validate that paths are legal before use
+    foreach ($p in @($baseDir, $downloadDir)) {
+        if (-not [System.IO.Path]::IsPathRooted($p)) { Throw-Error "Computed path is not rooted: '$p'" }
+        if (-not (Test-Path -LiteralPath (Split-Path -Path $p -Qualifier))) { Throw-Error "Drive in path does not exist: '$p'" }
+    }
+
     $null = New-Item -Path $baseDir -ItemType Directory -Force -ErrorAction Stop
     $null = New-Item -Path $downloadDir -ItemType Directory -Force -ErrorAction Stop
 
     # Download ZIP (bypass cert validation for internal/self-signed endpoints)
     $zipPath = Join-Path $downloadDir 'IIS10_2019.zip'
-    $extractDir = 'E:\IIS10_2019'
+    $extractDir = 'D:\IIS10_2019'
+
+    Write-Host "Paths:" -ForegroundColor DarkCyan
+    Write-Host "  Download dir: $downloadDir" -ForegroundColor DarkCyan
+    Write-Host "  Zip path:     $zipPath" -ForegroundColor DarkCyan
+    Write-Host "  Extract dir:  $extractDir" -ForegroundColor DarkCyan
 
     Write-Host "Downloading ZIP from: $ZipUrl" -ForegroundColor Yellow
     $prevCallback = [System.Net.ServicePointManager]::ServerCertificateValidationCallback
+    $prevProto = [System.Net.ServicePointManager]::SecurityProtocol
+    $prevExpect = [System.Net.ServicePointManager]::Expect100Continue
     [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
-    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
+    # Negotiate multiple TLS versions in case the server only supports older stacks
+    [System.Net.ServicePointManager]::SecurityProtocol = (
+        [System.Net.SecurityProtocolType]::Tls12 -bor 
+        [System.Net.SecurityProtocolType]::Tls11 -bor 
+        [System.Net.SecurityProtocolType]::Tls
+    )
+    [System.Net.ServicePointManager]::Expect100Continue = $false
+    [System.Net.ServicePointManager]::DefaultConnectionLimit = 16
+
+    $downloaded = $false
     try {
-        Invoke-WebRequest -Uri $ZipUrl -OutFile $zipPath -UseBasicParsing -ErrorAction Stop
+        # Retry Invoke-WebRequest a few times
+        for ($i = 1; $i -le 3 -and -not $downloaded; $i++) {
+            try {
+                Invoke-WebRequest -Uri $ZipUrl -OutFile $zipPath -UseBasicParsing -ErrorAction Stop
+                $downloaded = $true
+            }
+            catch {
+                if ($i -eq 3) { throw }
+                Start-Sleep -Seconds (2 * $i)
+            }
+        }
+    }
+    catch {
+        Write-Warning ("Invoke-WebRequest failed, falling back to BITS. Error: {0}" -f $_.Exception.Message)
+        try {
+            # BITS is resilient to flaky networks and supports HTTPS
+            Start-BitsTransfer -Source $ZipUrl -Destination $zipPath -Description "Download IIS package" -ErrorAction Stop
+            $downloaded = $true
+        }
+        catch {
+            Throw-Error ("Failed to download file via BITS as well. URL='{0}'. Error='{1}'" -f $ZipUrl, $_)
+        }
     }
     finally {
         [System.Net.ServicePointManager]::ServerCertificateValidationCallback = $prevCallback
+        [System.Net.ServicePointManager]::SecurityProtocol = $prevProto
+        [System.Net.ServicePointManager]::Expect100Continue = $prevExpect
     }
     Write-Host "Downloaded to: $zipPath" -ForegroundColor Green
 
     Write-Host "Extracting ZIP to: $extractDir" -ForegroundColor Yellow
     if (Test-Path $extractDir) { Remove-Item -Path $extractDir -Recurse -Force -ErrorAction SilentlyContinue }
-    Expand-Archive -LiteralPath $zipPath -DestinationPath $extractDir -Force
+    try {
+        Expand-Archive -LiteralPath $zipPath -DestinationPath $extractDir -Force
+    }
+    catch {
+        Throw-Error ("Failed to extract archive. ZipPath='{0}', Dest='{1}'. Error='{2}'" -f $zipPath, $extractDir, $_)
+    }
     Write-Host "Extraction complete." -ForegroundColor Green
 
-    # Copy this folder's contents (dependent files) to D:\iis
+    # Copy this folder's contents (dependent files) to E:\iis
     $sourceDir = $PSScriptRoot
-    if (-not (Test-Path $sourceDir)) { Throw-Error "Cannot resolve script root for dependency copy." }
+    if ([string]::IsNullOrWhiteSpace($sourceDir)) {
+        $sourceDir = Split-Path -Parent -Path $MyInvocation.MyCommand.Path
+    }
+    if (-not (Test-Path -LiteralPath $sourceDir)) { Throw-Error ("Cannot resolve script root for dependency copy. Resolved='{0}'" -f $sourceDir) }
 
     Write-Host "Copying scripts and dependencies from '$sourceDir' to '$baseDir'..." -ForegroundColor Yellow
     robocopy "$sourceDir" "$baseDir" *.* /E /NFL /NDL /NJH /NJS /NP | Out-Null
