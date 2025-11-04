@@ -6,25 +6,28 @@ function Throw-Error($Message) {
 }
 
 try {
-    [string]$ZipUrl = "https://10.32.20.128/public-archives/download/IIS2019/IIS10_2019.zip"
-    [int]$MinFreeGb = 50
-    Write-Host "Validating D: drive and free space..." -ForegroundColor Cyan
+    [string]$ZipUrl = "https://10.32.20.128/public-archives/download/IIS2019/IIS10_2019.zip",
+    [int]$MinFreeGb = 100,
+    [string]$TargetDrive = 'E:'
+    Write-Host "Validating $TargetDrive drive and free space..." -ForegroundColor Cyan
 
-    $dDrive = Get-PSDrive -Name 'E' -ErrorAction SilentlyContinue
-    if (-not $dDrive) {
-        Throw-Error "D: drive not found. Please attach or mount a D: volume."
+    $driveLetter = ($TargetDrive).TrimEnd(':','\')
+    $targetPsDrive = Get-PSDrive -Name $driveLetter -ErrorAction SilentlyContinue
+    if (-not $targetPsDrive) {
+        Throw-Error "$TargetDrive drive not found. Please attach or mount a $TargetDrive volume."
     }
 
-    $freeGb = [math]::Round(($dDrive.Free / 1GB), 2)
+    $freeGb = [math]::Round(($targetPsDrive.Free / 1GB), 2)
     if ($freeGb -lt $MinFreeGb) {
-        Throw-Error "Insufficient free space on D:. Required: $MinFreeGb GB, Available: $freeGb GB."
+        Throw-Error "Insufficient free space on $TargetDrive. Required: $MinFreeGb GB, Available: $freeGb GB."
     }
 
-    Write-Host "D: drive found with $freeGb GB free (>= $MinFreeGb GB required)." -ForegroundColor Green
+    Write-Host "$TargetDrive drive found with $freeGb GB free (>= $MinFreeGb GB required)." -ForegroundColor Green
 
-    # Prepare directories on D:
-    $baseDir = 'E:\iis'
-    $downloadDir = 'E:\IIS'
+    # Prepare directories on target drive
+    $driveRoot = ("{0}\" -f ($TargetDrive.TrimEnd(':','\')))
+    $baseDir = Join-Path $driveRoot 'iis'
+    $downloadDir = Join-Path $driveRoot 'IIS'
 
     # Validate that paths are legal before use
     foreach ($p in @($baseDir, $downloadDir)) {
@@ -37,7 +40,7 @@ try {
 
     # Download ZIP (bypass cert validation for internal/self-signed endpoints)
     $zipPath = Join-Path $downloadDir 'IIS10_2019.zip'
-    $extractDir = 'D:\IIS10_2019'
+    $extractDir = Join-Path $driveRoot 'IIS10_2019'
 
     Write-Host "Paths:" -ForegroundColor DarkCyan
     Write-Host "  Download dir: $downloadDir" -ForegroundColor DarkCyan
@@ -73,14 +76,31 @@ try {
         }
     }
     catch {
-        Write-Warning ("Invoke-WebRequest failed, falling back to BITS. Error: {0}" -f $_.Exception.Message)
+        Write-Warning ("Invoke-WebRequest failed, trying BITS. Error: {0}" -f $_.Exception.Message)
         try {
             # BITS is resilient to flaky networks and supports HTTPS
             Start-BitsTransfer -Source $ZipUrl -Destination $zipPath -Description "Download IIS package" -ErrorAction Stop
             $downloaded = $true
         }
         catch {
-            Throw-Error ("Failed to download file via BITS as well. URL='{0}'. Error='{1}'" -f $ZipUrl, $_)
+            Write-Warning ("BITS download failed. Error: {0}" -f $_.Exception.Message)
+            # Final fallback: curl.exe with -k -L (ignore cert errors, follow redirects)
+            $curlCmd = (Get-Command curl.exe -ErrorAction SilentlyContinue)?.Source
+            if (-not $curlCmd) { $curlCmd = "C:\\Windows\\System32\\curl.exe" }
+            if (Test-Path -LiteralPath $curlCmd) {
+                Write-Host ("Attempting curl fallback: '{0}'" -f $curlCmd) -ForegroundColor Yellow
+                $curlArgs = @('-k','-L',"$ZipUrl",'-o',"$zipPath")
+                $proc = Start-Process -FilePath $curlCmd -ArgumentList $curlArgs -NoNewWindow -PassThru -Wait
+                if ($proc.ExitCode -eq 0 -and (Test-Path -LiteralPath $zipPath) -and ((Get-Item $zipPath).Length -gt 0)) {
+                    $downloaded = $true
+                }
+                else {
+                    Throw-Error ("curl.exe fallback failed. ExitCode={0}. URL='{1}'" -f $proc.ExitCode, $ZipUrl)
+                }
+            }
+            else {
+                Throw-Error ("Failed to download file via BITS as well, and curl.exe not found. URL='{0}'" -f $ZipUrl)
+            }
         }
     }
     finally {
@@ -100,7 +120,7 @@ try {
     }
     Write-Host "Extraction complete." -ForegroundColor Green
 
-    # Copy this folder's contents (dependent files) to E:\iis
+    # Copy this folder's contents (dependent files) to D:\iis
     $sourceDir = $PSScriptRoot
     if ([string]::IsNullOrWhiteSpace($sourceDir)) {
         $sourceDir = Split-Path -Parent -Path $MyInvocation.MyCommand.Path
