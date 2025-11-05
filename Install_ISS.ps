@@ -1,12 +1,12 @@
-
-
 function Throw-Error($Message) {
     Write-Error $Message
     exit 1
 }
 
 try {
-    [string]$ZipUrl = "https://10.32.20.128/public-archives/download/IIS2019/IIS10_2019.zip"
+    [string]$ZipUrl = "https://10.32.20.128/public-archives/download/azarchive/IIS10_2019.zip"
+    
+    
     [int]$MinFreeGb = 50
     [string]$TargetDrive = 'E:'
     Write-Host "Validating $TargetDrive drive and free space..." -ForegroundColor Cyan
@@ -23,24 +23,19 @@ try {
     }
 
     Write-Host "$TargetDrive drive found with $freeGb GB free (>= $MinFreeGb GB required)." -ForegroundColor Green
-
-    # Prepare directories on target drive
+  # Prepare directories on target drive
     $driveRoot = $targetPsDrive.Root
-    $baseDir = Join-Path $driveRoot 'IIS'
-    $downloadDir = Join-Path $driveRoot 'IIS_Download'
+    $baseDir =  $driveRoot 
+    $downloadDir = Join-Path $driveRoot 'IIS_download'
 
-    # Validate that paths are legal before use
-    foreach ($p in @($baseDir, $downloadDir)) {
-        if (-not [System.IO.Path]::IsPathRooted($p)) { Throw-Error "Computed path is not rooted: '$p'" }
-        if (-not (Test-Path -LiteralPath (Split-Path -Path $p -Qualifier))) { Throw-Error "Drive in path does not exist: '$p'" }
-    }
+   
 
-    $null = New-Item -Path $baseDir -ItemType Directory -Force -ErrorAction Stop
+  #  $null = New-Item -Path $baseDir -ItemType Directory -Force -ErrorAction Stop
     $null = New-Item -Path $downloadDir -ItemType Directory -Force -ErrorAction Stop
 
     # Download ZIP (bypass cert validation for internal/self-signed endpoints)
     $zipPath = Join-Path $downloadDir 'IIS10_2019.zip'
-    $extractDir = Join-Path $driveRoot 'IIS10_2019'
+    $extractDir = Join-Path $driveRoot 'IIS10_2019_EXTRACT'
 
     Write-Host "Paths:" -ForegroundColor DarkCyan
     Write-Host "  Download dir: $downloadDir" -ForegroundColor DarkCyan
@@ -121,32 +116,50 @@ try {
     }
     Write-Host "Extraction complete." -ForegroundColor Green
 
-    # Copy this folder's contents (dependent files).
+    # Copy this folder's contents (dependent files) to IIS10
     $sourceDir = $extractDir
+   
+    Write-Host "  Source  dir:  $sourceDir" -ForegroundColor DarkCyan
     if ([string]::IsNullOrWhiteSpace($sourceDir)) {
         $sourceDir = Split-Path -Parent -Path $MyInvocation.MyCommand.Path
     }
     if (-not (Test-Path -LiteralPath $sourceDir)) { Throw-Error ("Cannot resolve script root for dependency copy. Resolved='{0}'" -f $sourceDir) }
-
+      $sourceDirr = Join-Path $extractDir '/11S10'
     Write-Host "Copying scripts and dependencies from '$sourceDir' to '$baseDir'..." -ForegroundColor Yellow
     robocopy "$sourceDir" "$baseDir" *.* /E /NFL /NDL /NJH /NJS /NP | Out-Null
     Write-Host "Copy complete." -ForegroundColor Green
-
+    Write-Host " trying running the script"
+    $baseDir = Join-Path $baseDir 'IIS10'
     $installScript = Join-Path $baseDir 'install-iis10-script.ps1'
     if (-not (Test-Path $installScript)) {
-        Throw-Error "Missing '$installScript'. Ensure your installer script exists"
+        Throw-Error "Missing '$installScript'. Ensure your installer script exists in the repository under files/iis/."
     }
 
     Write-Host "Launching installer as Administrator: $installScript" -ForegroundColor Cyan
     $args = "-ExecutionPolicy Bypass -NoProfile -File `"$installScript`""
     Start-Process -FilePath "powershell.exe" -Verb RunAs -ArgumentList $args -Wait
-
+    
+     # Verify IIS (W3SVC) service is running
+    Write-Host "Verifying IIS service (W3SVC) status..." -ForegroundColor Yellow
+    
+    $svc = Get-Service -Name W3SVC -ErrorAction SilentlyContinue
+    if ($svc) {
+        if ($svc.Status -ne 'Running') {
+            try { Start-Service -Name W3SVC -ErrorAction Stop } catch { Write-Warning "Failed to start W3SVC: $($_.Exception.Message)" }
+            $svc.Refresh()
+        }
+        Write-Host ("W3SVC status: {0}" -f $svc.Status) -ForegroundColor Green
+    }
+    else {
+        Write-Warning "W3SVC service not found. Ensure IIS role installed successfully."
+    }
+    
+    
+    
     Write-Host "Bootstrap completed successfully." -ForegroundColor Cyan
     exit 0
-}
+   }
 catch {
     Write-Error $_
     exit 1
 }
-
-
