@@ -1,49 +1,33 @@
-# Desired minimum free space in GB
+$driveLetter = "D"
 $minFreeGB = 100
-$driveLetter = "E:"
-
-# Convert GB to bytes
 $minFreeBytes = $minFreeGB * 1GB
-
-# Function to check if drive exists
-function DriveExists {
-    param($letter)
-    return (Get-PSDrive -Name $letter.TrimEnd(":") -ErrorAction SilentlyContinue) -ne $null
-}
-
-# Function to check free space
-function GetDriveFreeSpace {
-    param($letter)
-    $drive = Get-PSDrive -Name $letter.TrimEnd(":")
-    return $drive.Free
-}
+$VHDPath = "$env:SystemDrive\DDrive.vhdx"
 
 # Check if drive exists
-if (DriveExists $driveLetter) {
-    $freeSpace = GetDriveFreeSpace $driveLetter
-    if ($freeSpace -ge $minFreeBytes) {
-        Write-Output "$driveLetter exists and has enough free space ($([math]::Round($freeSpace/1GB)) GB)."
+$drive = Get-PSDrive -Name $driveLetter -ErrorAction SilentlyContinue
+if ($drive) {
+    if ($drive.Free -ge $minFreeBytes) {
+        Write-Output "$driveLetter: exists and has enough free space ($([math]::Round($drive.Free/1GB)) GB)."
         exit
     } else {
-        Write-Output "$driveLetter exists but does not have enough free space. Free: $([math]::Round($freeSpace/1GB)) GB."
+        Write-Output "$driveLetter: exists but has insufficient free space ($([math]::Round($drive.Free/1GB)) GB)."
     }
 } else {
-    Write-Output "$driveLetter does not exist."
+    Write-Output "$driveLetter: does not exist. Creating virtual drive..."
 }
 
-# Create a new virtual hard disk (VHDX) of 100 GB
-$VHDPath = "$env:SystemDrive\DDrive.vhdx"
-Write-Output "Creating virtual disk at $VHDPath with size $minFreeGB GB..."
-New-VHD -Path $VHDPath -SizeBytes ($minFreeGB*1GB) -Dynamic
+# Create VHD using diskpart
+$diskpartScript = @"
+create vdisk file="$VHDPath" maximum=$($minFreeGB*1024) type=expandable
+select vdisk file="$VHDPath"
+attach vdisk
+create partition primary
+format fs=ntfs quick label=DDrive
+assign letter=$driveLetter
+exit
+"@
 
-# Initialize, partition, and format
-$disk = Mount-VHD -Path $VHDPath -PassThru
-Initialize-Disk -Number $disk.Number -PartitionStyle GPT -PassThru |
-    New-Partition -AssignDriveLetter -UseMaximumSize |
-    Format-Volume -FileSystem NTFS -NewFileSystemLabel "DDrive" -Confirm:$false
+# Run diskpart
+$diskpartScript | diskpart
 
-# Assign drive letter D:
-$partition = Get-Partition -DiskNumber $disk.Number
-Set-Partition -PartitionNumber $partition.PartitionNumber -NewDriveLetter "D"
-
-Write-Output "Drive E: created successfully with 100 GB virtual disk."
+Write-Output "Drive $driveLetter: created successfully using virtual disk at $VHDPath."
