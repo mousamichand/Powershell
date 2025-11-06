@@ -4,43 +4,39 @@ function Throw-Error($Message) {
 }
 
 try {
-   
     [string]$ZipUrl = "https://10.32.20.128/public-archives/download/azarchive/IIS10_2019.zip"
     $minFreeGB = 50
-$minFreeBytes = $minFreeGB * 1GB
+    $minFreeBytes = $minFreeGB * 1GB
     [string]$TargetDrive = 'E:'
     $VHDPath = "$env:SystemDrive\DDrive.vhdx"
     $driveLetter = "E"
-    [string]$TargetDrive = 'E:'
 
-   
     # === Check if drive already exists ===
-$drive = Get-PSDrive -Name $driveLetter -ErrorAction SilentlyContinue
-if ($drive) {
-    if ($drive.Free -ge $minFreeBytes) {
-        Write-Output "${driveLetter}: exists and has enough free space ($([math]::Round($drive.Free/1GB)) GB)."
-        
+    $drive = Get-PSDrive -Name $driveLetter -ErrorAction SilentlyContinue
+    if ($drive) {
+        if ($drive.Free -ge $minFreeBytes) {
+            Write-Output "${driveLetter}: exists and has enough free space ($([math]::Round($drive.Free/1GB)) GB)."
+        } else {
+            Write-Output "${driveLetter}: exists but has insufficient free space ($([math]::Round($drive.Free/1GB)) GB)."
+            exit
+        }
     } else {
-        Write-Output "${driveLetter}: exists but has insufficient free space ($([math]::Round($drive.Free/1GB)) GB)."
-        exit
+        Write-Output "${driveLetter}: does not exist. Creating or attaching virtual drive..."
     }
-} else {
-    Write-Output "${driveLetter}: does not exist. Creating or attaching virtual drive..."
-}
 
-# === Build DiskPart script ===
-if (Test-Path $VHDPath) {
-    Write-Output "VHD already exists at $VHDPath. Attaching..."
-    $diskpartScript = @"
+    # === Build DiskPart script ===
+    if (Test-Path $VHDPath) {
+        Write-Output "VHD already exists at $VHDPath. Attaching..."
+        $diskpartScript = @"
 select vdisk file="$VHDPath"
 attach vdisk
 select partition 1
 assign letter=$driveLetter
 exit
 "@
-} else {
-    Write-Output "Creating new expandable VHD ($minFreeGB GB) at $VHDPath..."
-    $diskpartScript = @"
+    } else {
+        Write-Output "Creating new expandable VHD ($minFreeGB GB) at $VHDPath..."
+        $diskpartScript = @"
 create vdisk file="$VHDPath" maximum=$($minFreeGB*1024) type=expandable
 select vdisk file="$VHDPath"
 attach vdisk
@@ -50,39 +46,34 @@ format fs=ntfs quick label=DDrive
 assign letter=$driveLetter
 exit
 "@
-}
+    }
 
-# === Execute DiskPart ===
-$diskpartScript | diskpart | Out-Null
+    # === Execute DiskPart ===
+    $diskpartScript | diskpart | Out-Null
 
-# === Verify creation ===
-Start-Sleep -Seconds 2
-$drive = Get-PSDrive -Name $driveLetter -ErrorAction SilentlyContinue
-if ($drive) {
-    Write-Output "Drive ${driveLetter}: created or attached successfully using virtual disk at $VHDPath."
-    Write-Output "Free space: $([math]::Round($drive.Free/1GB)) GB"
-} else {
-    Write-Error "Failed to create or attach drive ${driveLetter}:"
-    exit
-}
+    # === Verify creation ===
+    Start-Sleep -Seconds 2
+    $drive = Get-PSDrive -Name $driveLetter -ErrorAction SilentlyContinue
+    if ($drive) {
+        Write-Output "Drive ${driveLetter}: created or attached successfully using virtual disk at $VHDPath."
+        Write-Output "Free space: $([math]::Round($drive.Free/1GB)) GB"
+    } else {
+        Write-Error "Failed to create or attach drive ${driveLetter}:"
+        exit
+    }
 
-   $driveLetter = ($TargetDrive).TrimEnd(':','\')
+    $driveLetter = ($TargetDrive).TrimEnd(':','\')
     $targetPsDrive = Get-PSDrive -Name $driveLetter -ErrorAction SilentlyContinue
-    
-  # Prepare directories on target drive
+
+    # Prepare directories on target drive
     $driveRoot = $targetPsDrive.Root
-    $baseDir =  $driveRoot 
+    $baseDir = $driveRoot
     $downloadDir = Join-Path $driveRoot 'IIS_download'
     $extractWorkDir = Join-Path $driveRoot 'IIS_extract_tmp'
 
-   
-
-  #  $null = New-Item -Path $baseDir -ItemType Directory -Force -ErrorAction Stop
     $null = New-Item -Path $downloadDir -ItemType Directory -Force -ErrorAction Stop
 
-    
-
-    # Download ZIP (bypass cert validation for internal/self-signed endpoints)
+    # Download ZIP
     $zipPath = Join-Path $downloadDir 'IIS10_2019.zip'
     $extractDir = $extractWorkDir
 
@@ -96,7 +87,6 @@ if ($drive) {
     $prevProto = [System.Net.ServicePointManager]::SecurityProtocol
     $prevExpect = [System.Net.ServicePointManager]::Expect100Continue
     [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
-    # Negotiate multiple TLS versions in case the server only supports older stacks
     [System.Net.ServicePointManager]::SecurityProtocol = (
         [System.Net.SecurityProtocolType]::Tls12 -bor 
         [System.Net.SecurityProtocolType]::Tls11 -bor 
@@ -107,28 +97,22 @@ if ($drive) {
 
     $downloaded = $false
     try {
-        # Retry Invoke-WebRequest a few times
         for ($i = 1; $i -le 3 -and -not $downloaded; $i++) {
             try {
                 Invoke-WebRequest -Uri $ZipUrl -OutFile $zipPath -UseBasicParsing -ErrorAction Stop
                 $downloaded = $true
-            }
-            catch {
+            } catch {
                 if ($i -eq 3) { throw }
                 Start-Sleep -Seconds (2 * $i)
             }
         }
-    }
-    catch {
+    } catch {
         Write-Warning ("Invoke-WebRequest failed, trying BITS. Error: {0}" -f $_.Exception.Message)
         try {
-            # BITS is resilient to flaky networks and supports HTTPS
             Start-BitsTransfer -Source $ZipUrl -Destination $zipPath -Description "Download IIS package" -ErrorAction Stop
             $downloaded = $true
-        }
-        catch {
+        } catch {
             Write-Warning ("BITS download failed. Error: {0}" -f $_.Exception.Message)
-            # Final fallback: curl.exe with -k -L (ignore cert errors, follow redirects)
             $curlCmd = $null
             $curlCmdInfo = Get-Command curl.exe -ErrorAction SilentlyContinue
             if ($curlCmdInfo) { $curlCmd = $curlCmdInfo.Source } else { $curlCmd = "C:\\Windows\\System32\\curl.exe" }
@@ -138,34 +122,32 @@ if ($drive) {
                 $proc = Start-Process -FilePath $curlCmd -ArgumentList $curlArgs -NoNewWindow -PassThru -Wait
                 if ($proc.ExitCode -eq 0 -and (Test-Path -LiteralPath $zipPath) -and ((Get-Item $zipPath).Length -gt 0)) {
                     $downloaded = $true
-                }
-                else {
+                } else {
                     Throw-Error ("curl.exe fallback failed. ExitCode={0}. URL='{1}'" -f $proc.ExitCode, $ZipUrl)
                 }
-            }
-            else {
+            } else {
                 Throw-Error ("Failed to download file via BITS as well, and curl.exe not found. URL='{0}'" -f $ZipUrl)
             }
         }
-    }
-    finally {
+    } finally {
         [System.Net.ServicePointManager]::ServerCertificateValidationCallback = $prevCallback
         [System.Net.ServicePointManager]::SecurityProtocol = $prevProto
         [System.Net.ServicePointManager]::Expect100Continue = $prevExpect
     }
-    Write-Host "Downloaded to: $zipPath"
 
+    Write-Host "Downloaded to: $zipPath"
     Write-Host "Extracting ZIP to: $extractDir"
+
     if (Test-Path $extractWorkDir) { Remove-Item -Path $extractWorkDir -Recurse -Force -ErrorAction SilentlyContinue }
+
     try {
         Expand-Archive -LiteralPath $zipPath -DestinationPath $extractDir -Force
-    }
-    catch {
+    } catch {
         Throw-Error ("Failed to extract archive. ZipPath='{0}', Dest='{1}'. Error='{2}'" -f $zipPath, $extractDir, $_)
     }
+
     Write-Host "Extraction complete."
 
-    # Determine content root (avoid copying the top-level folder itself)
     $contentRoot = $extractDir
     $topEntries = Get-ChildItem -LiteralPath $extractDir -Force | Where-Object { $_.Name -ne '__MACOSX' }
     if ($topEntries.Count -eq 1 -and $topEntries[0].PSIsContainer) {
@@ -175,20 +157,21 @@ if ($drive) {
     Write-Host ("Moving extracted contents from '{0}' to '{1}'" -f $contentRoot, $baseDir)
     robocopy "$contentRoot" "$baseDir" *.* /E /NFL /NDL /NJH /NJS /NP | Out-Null
 
-   
-   
-   # Cleanup downloaded artifacts
+    # Cleanup
     try { if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force -ErrorAction SilentlyContinue } } catch {}
     try { if (Test-Path -LiteralPath $downloadDir) { Remove-Item -LiteralPath $downloadDir -Recurse -Force -ErrorAction SilentlyContinue } } catch {}
     try { if (Test-Path -LiteralPath $extractWorkDir) { Remove-Item -LiteralPath $extractWorkDir -Recurse -Force -ErrorAction SilentlyContinue } } catch {}
- 
-# Try to locate the installer script in common locations after extraction
+
+    # Locate and launch installer
     $candidateInstallPaths = @(
         (Join-Path (Join-Path $baseDir 'IIS10') 'install-iis10-script.ps1'),
         (Join-Path $baseDir 'install-iis10-script.ps1')
     )
     $installScript = $null
-    foreach ($p in $candidateInstallPaths) { if (Test-Path -LiteralPath $p) { $installScript = $p; break } }
+    foreach ($p in $candidateInstallPaths) {
+        if (Test-Path -LiteralPath $p) { $installScript = $p; break }
+    }
+
     if (-not (Test-Path $installScript)) {
         Throw-Error "Missing '$installScript'. Ensure your installer script exists in the repository under files/iis/."
     }
@@ -196,10 +179,9 @@ if ($drive) {
     Write-Host "Launching installer as Administrator: $installScript"
     $args = "-ExecutionPolicy Bypass -NoProfile -File `"$installScript`""
     Start-Process -FilePath "powershell.exe" -Verb RunAs -ArgumentList $args -Wait
-    
-     # Verify IIS (W3SVC) service is running
+
+    # Verify IIS service
     Write-Host "Verifying IIS service (W3SVC) status..."
-    
     $svc = Get-Service -Name W3SVC -ErrorAction SilentlyContinue
     if ($svc) {
         if ($svc.Status -ne 'Running') {
@@ -207,16 +189,13 @@ if ($drive) {
             $svc.Refresh()
         }
         Write-Host ("W3SVC status: {0}" -f $svc.Status)
-    }
-    else {
+    } else {
         Write-Warning "W3SVC service not found. Ensure IIS role installed successfully."
     }
-    
 
-   
-    Write-Host " IIS Installation completed successfully."
+    Write-Host "IIS Installation completed successfully."
     exit 0
-   }
+}
 catch {
     Write-Error $_
     exit 1
