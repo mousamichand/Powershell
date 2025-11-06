@@ -5,7 +5,7 @@ function Throw-Error($Message) {
 
 try {
     [string]$ZipUrl = "https://10.32.20.128/public-archives/download/azarchive/IIS10_2019.zip"
-    
+   $expectedSize = 291100000
     
     [int]$MinFreeGb = 50
     [string]$TargetDrive = 'E:'
@@ -74,9 +74,39 @@ try {
     catch {
         Write-Warning ("Invoke-WebRequest failed, trying BITS. Error: {0}" -f $_.Exception.Message)
         try {
-            # BITS is resilient to flaky networks and supports HTTPS
-            Start-BitsTransfer -Source $ZipUrl -Destination $zipPath -Description "Download IIS package" -ErrorAction Stop
-            $downloaded = $true
+    $maxRetries = 5
+	$retryDelay = 5  # seconds
+ 
+	$wc = New-Object System.Net.WebClient
+ 
+	for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
+		try {
+			Write-Host "[$attempt/$maxRetries] Downloading IIS Scripts..."
+			$wc.DownloadFile($ZipUrl , $zipPath)
+ 
+			# Verify file exists and optionally size
+			if (Test-Path $zipPath) {
+				$fileSize = (Get-Item $zipPath).Length
+				if ($expectedSize -and $fileSize -ne $expectedSize) {
+					throw "Downloaded file size $fileSize bytes does not match expected $expectedSize bytes."
+				}
+				if ($fileSize -gt 0) {
+					Write-Host "Download complete: $fileSize bytes"
+					break
+				}
+			}
+			throw "File not downloaded or size is zero."
+		}
+		catch {
+			Write-Warning "Download failed: $($_.Exception.Message)"
+			if ($attempt -lt $maxRetries) {
+				Write-Host "Retrying in $retryDelay seconds..."
+				Start-Sleep -Seconds $retryDelay
+			}
+			else {
+				throw "All $maxRetries attempts failed."
+			}
+		}
         }
         catch {
             Write-Warning ("BITS download failed. Error: {0}" -f $_.Exception.Message)
