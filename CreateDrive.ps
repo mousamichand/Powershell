@@ -7,13 +7,13 @@ $VHDPath = "$env:SystemDrive\DDrive.vhdx"
 $drive = Get-PSDrive -Name $driveLetter -ErrorAction SilentlyContinue
 if ($drive) {
     if ($drive.Free -ge $minFreeBytes) {
-        Write-Output "$driveLetter: exists and has enough free space ($([math]::Round($drive.Free/1GB)) GB)."
+        Write-Output "${driveLetter}: exists and has enough free space ($([math]::Round($drive.Free/1GB)) GB)."
         exit
     } else {
-        Write-Output "$driveLetter: exists but has insufficient free space ($([math]::Round($drive.Free/1GB)) GB)."
+        Write-Output "${driveLetter}: exists but has insufficient free space ($([math]::Round($drive.Free/1GB)) GB)."
     }
 } else {
-    Write-Output "$driveLetter: does not exist. Creating virtual drive..."
+    Write-Output "${driveLetter}: does not exist. Creating virtual drive..."
 }
 
 # Create VHD using diskpart
@@ -30,4 +30,4 @@ exit
 # Run diskpart
 $diskpartScript | diskpart
 
-Write-Output "Drive $driveLetter: created successfully using virtual disk at $VHDPath."
+Write-Output "Drive ${driveLetter}: created successfully using virtual disk at $VHDPath."
