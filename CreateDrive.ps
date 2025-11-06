@@ -1,9 +1,20 @@
+# Ensure D: drive exists with at least a given amount of free space (in GB)
+# If it doesn't exist, create a virtual drive (VHDX) and assign it to D:
+
+# === Configuration ===
 $driveLetter = "D"
 $minFreeGB = 100
 $minFreeBytes = $minFreeGB * 1GB
 $VHDPath = "$env:SystemDrive\DDrive.vhdx"
 
-# Check if drive exists
+# === Admin Rights Check ===
+if (-not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+    [Security.Principal.WindowsBuiltInRole] "Administrator")) {
+    Write-Error "You must run this script as Administrator."
+    exit 1
+}
+
+# === Check if drive already exists ===
 $drive = Get-PSDrive -Name $driveLetter -ErrorAction SilentlyContinue
 if ($drive) {
     if ($drive.Free -ge $minFreeBytes) {
@@ -13,21 +24,42 @@ if ($drive) {
         Write-Output "${driveLetter}: exists but has insufficient free space ($([math]::Round($drive.Free/1GB)) GB)."
     }
 } else {
-    Write-Output "${driveLetter}: does not exist. Creating virtual drive..."
+    Write-Output "${driveLetter}: does not exist. Creating or attaching virtual drive..."
 }
 
-# Create VHD using diskpart
-$diskpartScript = @"
+# === Build DiskPart script ===
+if (Test-Path $VHDPath) {
+    Write-Output "VHD already exists at $VHDPath. Attaching..."
+    $diskpartScript = @"
+select vdisk file="$VHDPath"
+attach vdisk
+select partition 1
+assign letter=$driveLetter
+exit
+"@
+} else {
+    Write-Output "Creating new expandable VHD ($minFreeGB GB) at $VHDPath..."
+    $diskpartScript = @"
 create vdisk file="$VHDPath" maximum=$($minFreeGB*1024) type=expandable
 select vdisk file="$VHDPath"
 attach vdisk
 create partition primary
+select partition 1
 format fs=ntfs quick label=DDrive
 assign letter=$driveLetter
 exit
 "@
+}
 
-# Run diskpart
-$diskpartScript | diskpart
+# === Execute DiskPart ===
+$diskpartScript | diskpart | Out-Null
 
-Write-Output "Drive ${driveLetter}: created successfully using virtual disk at $VHDPath."
+# === Verify creation ===
+Start-Sleep -Seconds 2
+$drive = Get-PSDrive -Name $driveLetter -ErrorAction SilentlyContinue
+if ($drive) {
+    Write-Output "Drive ${driveLetter}: created or attached successfully using virtual disk at $VHDPath."
+    Write-Output "Free space: $([math]::Round($drive.Free/1GB)) GB"
+} else {
+    Write-Error "Failed to create or attach drive ${driveLetter}:"
+}
