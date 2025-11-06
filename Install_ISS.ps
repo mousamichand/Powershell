@@ -4,12 +4,13 @@ function Throw-Error($Message) {
 }
 
 try {
+   
     [string]$ZipUrl = "https://10.32.20.128/public-archives/download/azarchive/IIS10_2019.zip"
-    
-    
     [int]$MinFreeGb = 50
     [string]$TargetDrive = 'E:'
-    Write-Host "Validating $TargetDrive drive and free space..." -ForegroundColor Cyan
+
+   
+    Write-Host "Validating $TargetDrive drive and free space..."
 
     $driveLetter = ($TargetDrive).TrimEnd(':','\')
     $targetPsDrive = Get-PSDrive -Name $driveLetter -ErrorAction SilentlyContinue
@@ -22,7 +23,7 @@ try {
         Throw-Error "Insufficient free space on $TargetDrive. Required: $MinFreeGb GB, Available: $freeGb GB."
     }
 
-    Write-Host "$TargetDrive drive found with $freeGb GB free (>= $MinFreeGb GB required)." -ForegroundColor Green
+    Write-Host "$TargetDrive drive found with $freeGb GB free (>= $MinFreeGb GB required)."
   # Prepare directories on target drive
     $driveRoot = $targetPsDrive.Root
     $baseDir =  $driveRoot 
@@ -34,16 +35,18 @@ try {
   #  $null = New-Item -Path $baseDir -ItemType Directory -Force -ErrorAction Stop
     $null = New-Item -Path $downloadDir -ItemType Directory -Force -ErrorAction Stop
 
+    
+
     # Download ZIP (bypass cert validation for internal/self-signed endpoints)
     $zipPath = Join-Path $downloadDir 'IIS10_2019.zip'
     $extractDir = $extractWorkDir
 
-    Write-Host "Paths:" -ForegroundColor DarkCyan
-    Write-Host "  Download dir: $downloadDir" -ForegroundColor DarkCyan
-    Write-Host "  Zip path:     $zipPath" -ForegroundColor DarkCyan
-    Write-Host "  Extract dir:  $extractDir" -ForegroundColor DarkCyan
+    Write-Host "Paths:"
+    Write-Host "  Download dir: $downloadDir"
+    Write-Host "  Zip path:     $zipPath"
+    Write-Host "  Extract dir:  $extractDir"
 
-    Write-Host "Downloading ZIP from: $ZipUrl" -ForegroundColor Yellow
+    Write-Host "Downloading ZIP from: $ZipUrl"
     $prevCallback = [System.Net.ServicePointManager]::ServerCertificateValidationCallback
     $prevProto = [System.Net.ServicePointManager]::SecurityProtocol
     $prevExpect = [System.Net.ServicePointManager]::Expect100Continue
@@ -85,7 +88,7 @@ try {
             $curlCmdInfo = Get-Command curl.exe -ErrorAction SilentlyContinue
             if ($curlCmdInfo) { $curlCmd = $curlCmdInfo.Source } else { $curlCmd = "C:\\Windows\\System32\\curl.exe" }
             if (Test-Path -LiteralPath $curlCmd) {
-                Write-Host ("Attempting curl fallback: '{0}'" -f $curlCmd) -ForegroundColor Yellow
+                Write-Host ("Attempting curl fallback: '{0}'" -f $curlCmd)
                 $curlArgs = @('-k','-L',"$ZipUrl",'-o',"$zipPath")
                 $proc = Start-Process -FilePath $curlCmd -ArgumentList $curlArgs -NoNewWindow -PassThru -Wait
                 if ($proc.ExitCode -eq 0 -and (Test-Path -LiteralPath $zipPath) -and ((Get-Item $zipPath).Length -gt 0)) {
@@ -105,9 +108,9 @@ try {
         [System.Net.ServicePointManager]::SecurityProtocol = $prevProto
         [System.Net.ServicePointManager]::Expect100Continue = $prevExpect
     }
-    Write-Host "Downloaded to: $zipPath" -ForegroundColor Green
+    Write-Host "Downloaded to: $zipPath"
 
-    Write-Host "Extracting ZIP to: $extractDir" -ForegroundColor Yellow
+    Write-Host "Extracting ZIP to: $extractDir"
     if (Test-Path $extractWorkDir) { Remove-Item -Path $extractWorkDir -Recurse -Force -ErrorAction SilentlyContinue }
     try {
         Expand-Archive -LiteralPath $zipPath -DestinationPath $extractDir -Force
@@ -115,7 +118,7 @@ try {
     catch {
         Throw-Error ("Failed to extract archive. ZipPath='{0}', Dest='{1}'. Error='{2}'" -f $zipPath, $extractDir, $_)
     }
-    Write-Host "Extraction complete." -ForegroundColor Green
+    Write-Host "Extraction complete."
 
     # Determine content root (avoid copying the top-level folder itself)
     $contentRoot = $extractDir
@@ -124,15 +127,17 @@ try {
         $contentRoot = $topEntries[0].FullName
     }
 
-    Write-Host ("Moving extracted contents from '{0}' to '{1}'" -f $contentRoot, $baseDir) -ForegroundColor Yellow
+    Write-Host ("Moving extracted contents from '{0}' to '{1}'" -f $contentRoot, $baseDir)
     robocopy "$contentRoot" "$baseDir" *.* /E /NFL /NDL /NJH /NJS /NP | Out-Null
 
-    # Cleanup downloaded artifacts
+   
+   
+   # Cleanup downloaded artifacts
     try { if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force -ErrorAction SilentlyContinue } } catch {}
     try { if (Test-Path -LiteralPath $downloadDir) { Remove-Item -LiteralPath $downloadDir -Recurse -Force -ErrorAction SilentlyContinue } } catch {}
     try { if (Test-Path -LiteralPath $extractWorkDir) { Remove-Item -LiteralPath $extractWorkDir -Recurse -Force -ErrorAction SilentlyContinue } } catch {}
-
-    # Try to locate the installer script in common locations after extraction
+ 
+# Try to locate the installer script in common locations after extraction
     $candidateInstallPaths = @(
         (Join-Path (Join-Path $baseDir 'IIS10') 'install-iis10-script.ps1'),
         (Join-Path $baseDir 'install-iis10-script.ps1')
@@ -143,12 +148,12 @@ try {
         Throw-Error "Missing '$installScript'. Ensure your installer script exists in the repository under files/iis/."
     }
 
-    Write-Host "Launching installer as Administrator: $installScript" -ForegroundColor Cyan
+    Write-Host "Launching installer as Administrator: $installScript"
     $args = "-ExecutionPolicy Bypass -NoProfile -File `"$installScript`""
     Start-Process -FilePath "powershell.exe" -Verb RunAs -ArgumentList $args -Wait
     
      # Verify IIS (W3SVC) service is running
-    Write-Host "Verifying IIS service (W3SVC) status..." -ForegroundColor Yellow
+    Write-Host "Verifying IIS service (W3SVC) status..."
     
     $svc = Get-Service -Name W3SVC -ErrorAction SilentlyContinue
     if ($svc) {
@@ -156,15 +161,15 @@ try {
             try { Start-Service -Name W3SVC -ErrorAction Stop } catch { Write-Warning "Failed to start W3SVC: $($_.Exception.Message)" }
             $svc.Refresh()
         }
-        Write-Host ("W3SVC status: {0}" -f $svc.Status) -ForegroundColor Green
+        Write-Host ("W3SVC status: {0}" -f $svc.Status)
     }
     else {
         Write-Warning "W3SVC service not found. Ensure IIS role installed successfully."
     }
     
-    
-    
-    Write-Host "Bootstrap completed successfully." -ForegroundColor Cyan
+
+   
+    Write-Host "Bootstrap completed successfully."
     exit 0
    }
 catch {
