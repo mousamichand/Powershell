@@ -6,24 +6,69 @@ function Throw-Error($Message) {
 try {
    
     [string]$ZipUrl = "https://10.32.20.128/public-archives/download/azarchive/IIS10_2019.zip"
-    [int]$MinFreeGb = 100
-    [string]$TargetDrive = 'D:'
+    $minFreeGB = 50
+$minFreeBytes = $minFreeGB * 1GB
+    [string]$TargetDrive = 'E:'
+    $VHDPath = "$env:SystemDrive\DDrive.vhdx"
+    $driveLetter = "E"
+    [string]$TargetDrive = 'E:'
 
    
-    Write-Host "Validating $TargetDrive drive and free space..."
+    # === Check if drive already exists ===
+$drive = Get-PSDrive -Name $driveLetter -ErrorAction SilentlyContinue
+if ($drive) {
+    if ($drive.Free -ge $minFreeBytes) {
+        Write-Output "${driveLetter}: exists and has enough free space ($([math]::Round($drive.Free/1GB)) GB)."
+        
+    } else {
+        Write-Output "${driveLetter}: exists but has insufficient free space ($([math]::Round($drive.Free/1GB)) GB)."
+        exit
+    }
+} else {
+    Write-Output "${driveLetter}: does not exist. Creating or attaching virtual drive..."
+}
 
-    $driveLetter = ($TargetDrive).TrimEnd(':','\')
+# === Build DiskPart script ===
+if (Test-Path $VHDPath) {
+    Write-Output "VHD already exists at $VHDPath. Attaching..."
+    $diskpartScript = @"
+select vdisk file="$VHDPath"
+attach vdisk
+select partition 1
+assign letter=$driveLetter
+exit
+"@
+} else {
+    Write-Output "Creating new expandable VHD ($minFreeGB GB) at $VHDPath..."
+    $diskpartScript = @"
+create vdisk file="$VHDPath" maximum=$($minFreeGB*1024) type=expandable
+select vdisk file="$VHDPath"
+attach vdisk
+create partition primary
+select partition 1
+format fs=ntfs quick label=DDrive
+assign letter=$driveLetter
+exit
+"@
+}
+
+# === Execute DiskPart ===
+$diskpartScript | diskpart | Out-Null
+
+# === Verify creation ===
+Start-Sleep -Seconds 2
+$drive = Get-PSDrive -Name $driveLetter -ErrorAction SilentlyContinue
+if ($drive) {
+    Write-Output "Drive ${driveLetter}: created or attached successfully using virtual disk at $VHDPath."
+    Write-Output "Free space: $([math]::Round($drive.Free/1GB)) GB"
+} else {
+    Write-Error "Failed to create or attach drive ${driveLetter}:"
+    exit
+}
+
+   $driveLetter = ($TargetDrive).TrimEnd(':','\')
     $targetPsDrive = Get-PSDrive -Name $driveLetter -ErrorAction SilentlyContinue
-    if (-not $targetPsDrive) {
-        Throw-Error "$TargetDrive drive not found. Please attach or mount a $TargetDrive volume."
-    }
-
-    $freeGb = [math]::Round(($targetPsDrive.Free / 1GB), 2)
-    if ($freeGb -lt $MinFreeGb) {
-        Throw-Error "Insufficient free space on $TargetDrive. Required: $MinFreeGb GB, Available: $freeGb GB."
-    }
-
-    Write-Host "$TargetDrive drive found with $freeGb GB free (>= $MinFreeGb GB required)."
+    
   # Prepare directories on target drive
     $driveRoot = $targetPsDrive.Root
     $baseDir =  $driveRoot 
