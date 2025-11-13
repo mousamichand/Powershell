@@ -47,30 +47,6 @@ $checks += [pscustomobject]@{
 }
 
 # -----------------------
-# IIS Installation Path (Registry - InstallPath)
-# -----------------------
-$iisInstallReg = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\InetStp" -Name "InstallPath" -ErrorAction SilentlyContinue
-$installPath = if ($iisInstallReg -and $iisInstallReg.InstallPath) { $iisInstallReg.InstallPath } else { $null }
-
-$checks += [pscustomobject]@{
-    Check  = "IIS Installation Path"
-    Status = if ($installPath -and (Test-Path $installPath)) { "Exists" } else { "Missing" }
-    Path   = if ($installPath) { $installPath } else { "N/A" }
-}
-
-# -----------------------
-# Default Website Path (Registry - PathWWWRoot)
-# -----------------------
-$wwwRootReg = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\InetStp" -Name "PathWWWRoot" -ErrorAction SilentlyContinue
-$wwwRootPath = if ($wwwRootReg -and $wwwRootReg.PathWWWRoot) { $wwwRootReg.PathWWWRoot } else { $null }
-
-$checks += [pscustomobject]@{
-    Check  = "Default Website Path"
-    Status = if ($wwwRootPath -and (Test-Path $wwwRootPath)) { "Exists" } else { "Missing" }
-    Path   = if ($wwwRootPath) { $wwwRootPath } else { "N/A" }
-}
-
-# -----------------------
 # Default App Pool (assigned to default website)
 # -----------------------
 $defaultSite = Get-Website | Where-Object { $_.physicalPath -eq $wwwRootPath } | Select-Object -First 1
