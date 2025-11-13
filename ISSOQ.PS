@@ -1,0 +1,82 @@
+# Full IIS Validation Script with Default Page Check
+
+Import-Module WebAdministration
+
+$checks = @()
+
+# IIS Management Console
+$iisConsole = Get-WindowsFeature Web-Mgmt-Console
+$checks += [pscustomobject]@{
+    Check  = "IIS Management Console"
+    Status = if ($iisConsole.Installed) { "Installed" } else { "Not Installed" }
+}
+
+# WAS Service
+$was = Get-Service WAS -ErrorAction SilentlyContinue
+$checks += [pscustomobject]@{
+    Check  = "WAS Service"
+    Status = if ($was -and $was.Status -eq 'Running') { "Running" } elseif ($was) { "Stopped" } else { "Not Found" }
+}
+
+# W3SVC Service
+$w3svc = Get-Service W3SVC -ErrorAction SilentlyContinue
+$checks += [pscustomobject]@{
+    Check  = "W3SVC Service"
+    Status = if ($w3svc -and $w3svc.Status -eq 'Running') { "Running" } elseif ($w3svc) { "Stopped" } else { "Not Found" }
+}
+
+# .NET Framework 4.8
+$net48 = Get-ChildItem 'HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full' |
+         Get-ItemProperty -Name Release -ErrorAction SilentlyContinue
+$checks += [pscustomobject]@{
+    Check  = ".NET Framework 4.8"
+    Status = if ($net48.Release -ge 528040) { "Installed" } else { "Not Installed" }
+}
+
+# IIS Installation Path
+$inetsrvPath = Join-Path $env:SystemRoot "System32\inetsrv"
+$checks += [pscustomobject]@{
+    Check  = "IIS Installation Path"
+    Status = if (Test-Path $inetsrvPath) { "Exists" } else { "Missing" }
+    Path   = $inetsrvPath
+}
+
+# Default Website
+$defaultSite = Get-Website -Name "Default Web Site" -ErrorAction SilentlyContinue
+$checks += [pscustomobject]@{
+    Check  = "Default Website"
+    Status = if ($defaultSite) { "Present" } else { "Missing" }
+    Path   = if ($defaultSite) { $defaultSite.physicalPath } else { "N/A" }
+}
+
+# IIS Log Path
+$logPath = if ($defaultSite) { $defaultSite.logFile.directory } else { "N/A" }
+$checks += [pscustomobject]@{
+    Check  = "IIS Log Path"
+    Status = if ($logPath -ne "N/A") { "Exists" } else { "N/A" }
+    Path   = $logPath
+}
+
+# Default Application Pool
+$defaultAppPool = Get-Item "IIS:\AppPools\DefaultAppPool" -ErrorAction SilentlyContinue
+$checks += [pscustomobject]@{
+    Check  = "Default Application Pool"
+    Status = if ($defaultAppPool) { "Present" } else { "Missing" }
+}
+
+# Check accessibility of QUAL.HTML page
+$pageUrl = "http://localhost/QUAL.HTML"
+try {
+    $response = Invoke-WebRequest -Uri $pageUrl -UseBasicParsing -ErrorAction Stop
+    $pageStatus = if ($response.StatusCode -eq 200) { "Accessible" } else { "Not Accessible" }
+} catch {
+    $pageStatus = "Not Accessible"
+}
+$checks += [pscustomobject]@{
+    Check  = "Default Page QUAL.HTML"
+    Status = $pageStatus
+    Path   = $pageUrl
+}
+
+# Display tabular report
+$checks | Format-Table -AutoSize
