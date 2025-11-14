@@ -1,6 +1,6 @@
 # Fully Dynamic IIS & .NET Validation Script
 
-Import-Module WebAdministration
+Import-Module WebAdministration -ErrorAction SilentlyContinue
 $checks = @()
 
 # -----------------------
@@ -8,19 +8,43 @@ $checks = @()
 # -----------------------
 $webMgmtInstalled = $false
 if (Get-Module -ListAvailable -Name ServerManager) {
-    Import-Module ServerManager
+    Import-Module ServerManager -ErrorAction SilentlyContinue
     $webMgmtInstalled = (Get-WindowsFeature Web-Mgmt-Console).Installed
 }
 
-$checks += [pscustomobject]@{Check="IIS Console"; Status=if($webMgmtInstalled){"Installed"}else{"Missing"}}
-$checks += [pscustomobject]@{Check="WAS Service"; Status=if((Get-Service WAS -ErrorAction SilentlyContinue).Status -eq 'Running'){"Running"}else{"Stopped"}}
-$checks += [pscustomobject]@{Check="W3SVC Service"; Status=if((Get-Service W3SVC -ErrorAction SilentlyContinue).Status -eq 'Running'){"Running"}else{"Stopped"}}
+$checks += [pscustomobject]@{
+    Check  = "IIS Console"
+    Status = if ($webMgmtInstalled) { "Installed" } else { "Missing" }
+}
+
+# Function to safely get service status
+function Get-ServiceStatusSafe {
+    param([string]$ServiceName)
+    $svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+    if ($svc) {
+        if ($svc.Status -eq 'Running') { return "Running" } else { return "Stopped" }
+    } else {
+        return "Not Installed"
+    }
+}
+
+$checks += [pscustomobject]@{
+    Check  = "WAS Service"
+    Status = Get-ServiceStatusSafe -ServiceName "WAS"
+}
+$checks += [pscustomobject]@{
+    Check  = "W3SVC Service"
+    Status = Get-ServiceStatusSafe -ServiceName "W3SVC"
+}
 
 # -----------------------
 # .NET 4.8 Check
 # -----------------------
 $net48 = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full" -ErrorAction SilentlyContinue).Release
-$checks += [pscustomobject]@{Check=".NET 4.8"; Status=if($net48 -ge 528040){"Installed"}else{"Missing"}}
+$checks += [pscustomobject]@{
+    Check  = ".NET 4.8"
+    Status = if ($net48 -ge 528040) { "Installed" } else { "Missing" }
+}
 
 # -----------------------
 # IIS Installation Path (Registry - InstallPath)
@@ -49,7 +73,7 @@ $checks += [pscustomobject]@{
 # -----------------------
 # Default App Pool (assigned to default website)
 # -----------------------
-$defaultSite = Get-Website | Where-Object { $_.physicalPath -eq $wwwRootPath } | Select-Object -First 1
+$defaultSite = Get-Website -ErrorAction SilentlyContinue | Where-Object { $_.physicalPath -eq $wwwRootPath } | Select-Object -First 1
 $appPoolName = if ($defaultSite) { $defaultSite.applicationPool } else { $null }
 $appPool = if ($appPoolName) { Get-Item "IIS:\AppPools\$appPoolName" -ErrorAction SilentlyContinue } else { $null }
 
@@ -70,7 +94,11 @@ try {
     $pageStatus = "Not Accessible"
 }
 
-$checks += [pscustomobject]@{Check="QUAL.HTML Page"; Status=$pageStatus; Path=$pageUrl}
+$checks += [pscustomobject]@{
+    Check  = "QUAL.HTML Page"
+    Status = $pageStatus
+    Path   = $pageUrl
+}
 
 # -----------------------
 # Display Final Table
