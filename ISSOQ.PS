@@ -4,7 +4,7 @@ Import-Module WebAdministration -ErrorAction SilentlyContinue
 $checks = @()
 
 # Set expected Windows version
-$ExpectedWindowsVersion = "2019"  # morpheus custom option varaible
+$ExpectedWindowsVersion = "2019"  # replace with morpheus custom option var
 
 # Get current Windows ProductName
 $winInfo = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion"
@@ -26,7 +26,7 @@ $checks += [pscustomobject]@{
 
 
 # Set expected IIS version
-$ExpectedIISVersion = "10.0"   # e.g., "10.0" for IIS 10
+$ExpectedIISVersion = "10.0"   # e.g., "10.0" for IIS 10 # replace with morpheus custom option var
 
 
 
