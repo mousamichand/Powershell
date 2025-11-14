@@ -3,6 +3,52 @@
 Import-Module WebAdministration -ErrorAction SilentlyContinue
 $checks = @()
 
+# Set expected Windows version
+$ExpectedWindowsVersion = "2019"  # morpheus custom option varaible
+
+# Get current Windows ProductName
+$winInfo = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion"
+$windowsVersion = $winInfo.ProductName
+
+# Compare with expected version
+$status = if ($windowsVersion -like "*$ExpectedWindowsVersion*") { 
+    "Match" 
+} else { 
+    "Mismatch" 
+}
+
+# Output as table row
+$checks += [pscustomobject]@{
+    Check  = "Windows Server Version"
+    Status = $status
+    Path   = $windowsVersion
+} 
+
+
+# Set expected IIS version
+$ExpectedIISVersion = "10.0"   # e.g., "10.0" for IIS 10
+
+
+
+# Registry path for IIS
+$iisRegPath = "HKLM:\SOFTWARE\Microsoft\InetStp"
+
+if (Test-Path $iisRegPath) {
+    $iisVersion = (Get-ItemProperty $iisRegPath).VersionString
+    $status = if ($iisVersion -like "*$ExpectedIISVersion*") { "Match" } else { "Mismatch" }
+} else {
+    $iisVersion = "Not Installed"
+    $status = "Missing"
+}
+
+# Output as table row
+$checks += [pscustomobject]@{
+    Check  = "IIS Version"
+    Status = $status
+    Path   = $iisVersion
+} 
+
+
 # -----------------------
 # IIS & Services
 # -----------------------
