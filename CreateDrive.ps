@@ -1,0 +1,10 @@
+$diskNumber = 1   # change to the disk you want to use
+$driveLetter = 'D'
+
+# Create partition
+$partition = New-Partition -DiskNumber $diskNumber -UseMaximumSize -DriveLetter $driveLetter
+
+# Format volume
+Format-Volume -DriveLetter $driveLetter -FileSystem NTFS -NewFileSystemLabel "Data" -Confirm:$false
+
+Write-Host "Drive $driveLetter: created successfully."
