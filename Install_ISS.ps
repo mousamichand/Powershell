@@ -4,7 +4,8 @@ function Throw-Error($Message) {
 }
 
 try {
-    [string]$ZipUrl = "https://10.32.20.128/public-archives/download/azarchive/IIS10_2019.zip"
+    [string]$IISVersion = "IIS10_2019"
+    [string]$ZipUrl = "https://10.32.20.128/public-archives/download/azarchive/$IISVersion"
     $expectedSize = 291100000
 
     [int]$MinFreeGb = 50
@@ -29,7 +30,7 @@ try {
     $extractWorkDir = Join-Path $driveRoot 'IIS_extract_tmp'
     $null = New-Item -Path $downloadDir -ItemType Directory -Force -ErrorAction Stop
 
-    $zipPath = Join-Path $downloadDir 'IIS10_2019.zip'
+    $zipPath = Join-Path $downloadDir $IISVersion
     $extractDir = $extractWorkDir
 
    # Write-Host "Paths:" 
