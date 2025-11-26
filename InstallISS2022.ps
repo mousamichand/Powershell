@@ -1,0 +1,168 @@
+function Throw-Error($Message) {
+    Write-Error $Message
+    exit 1
+}
+
+try {
+    [string]$ZipUrl = "https://stage.morpheusdata.com/public-archives/download/Public%20Install%20Files/IIS10_2019.zip"
+    $expectedSize = 291100000
+
+    [int]$MinFreeGb = 100
+    [string]$TargetDrive = 'D'
+    Write-Host "Validating $TargetDrive drive and free space..."
+
+    $driveLetter = ($TargetDrive).TrimEnd(':', '\')
+    $targetPsDrive = Get-PSDrive -Name $driveLetter -ErrorAction SilentlyContinue
+    if (-not $targetPsDrive) {
+        Throw-Error "$TargetDrive drive not found. Please attach or mount a $TargetDrive volume."
+    }
+
+    $freeGb = [math]::Round(($targetPsDrive.Free / 1GB), 2)
+    if ($freeGb -lt $MinFreeGb) {
+        Throw-Error "Insufficient free space on $TargetDrive. Required: $MinFreeGb GB, Available: $freeGb GB."
+    }
+
+    Write-Host "$TargetDrive drive found with $freeGb GB free (>= $MinFreeGb GB required)."
+
+    $driveRoot = $targetPsDrive.Root
+    $downloadDir = Join-Path $driveRoot 'IIS_download'
+    $extractWorkDir = Join-Path $driveRoot 'IIS_extract_tmp'
+    $null = New-Item -Path $downloadDir -ItemType Directory -Force -ErrorAction Stop
+
+    $zipPath = Join-Path $downloadDir 'IIS10_2022.zip'
+    $extractDir = $extractWorkDir
+
+   # Write-Host "Paths:" 
+   # Write-Host "  Download dir: $downloadDir"
+   # Write-Host "  Zip path:     $zipPath"
+  #  Write-Host "  Extract dir:  $extractDir"
+
+   # Write-Host "Downloading ZIP from: $ZipUrl"
+# Ignore SSL certificate errors globally
+[System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}
+
+    #$downloaded = $false
+  #  try {
+  #      for ($i = 1; $i -le 3 -and -not $downloaded; $i++) {
+            try {
+                Invoke-WebRequest -Uri $ZipUrl -OutFile $zipPath -UseBasicParsing -ErrorAction Stop
+              #  $downloaded = $true
+            }
+           <#  catch {
+                if ($i -eq 3) { throw }
+                Start-Sleep -Seconds (2 * $i)
+            } #>
+        #}
+    #}
+    catch {
+        Write-Warning ("Invoke-WebRequest failed, trying WebClient. Error: {0}" -f $_.Exception.Message)
+        try {
+            $maxRetries = 5
+            $retryDelay = 5
+            $wc = New-Object System.Net.WebClient
+            for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
+                try {
+                    Write-Host "[$attempt/$maxRetries] Downloading IIS Scripts..."
+                    $wc.DownloadFile($ZipUrl, $zipPath)
+                    if (Test-Path $zipPath) {
+                        $fileSize = (Get-Item $zipPath).Length
+                        if ($expectedSize -and $fileSize -lt $expectedSize) {
+                            throw "Downloaded file size $fileSize bytes does not match expected $expectedSize bytes."
+                        }
+                        if ($fileSize -gt 0) {
+                            Write-Host "Download complete: $fileSize bytes"
+                            break
+                        }
+                    }
+                    throw "File not downloaded or size is zero."
+                }
+                catch {
+                    Write-Warning "Download failed: $($_.Exception.Message)"
+                    if ($attempt -lt $maxRetries) {
+                        Write-Host "Retrying in $retryDelay seconds..."
+                        Start-Sleep -Seconds $retryDelay
+                    }
+                    else {
+                        throw "All $maxRetries attempts failed."
+                    }
+                }
+            }
+        }
+        catch {
+            Write-Warning ("WebClient download failed. Error: {0}" -f $_.Exception.Message)
+        }
+    }
+
+    #Write-Host "Downloaded to: $zipPath" 
+#
+ #   Write-Host "Extracting ZIP to: $extractDir"
+    <# if (Test-Path $extractWorkDir) {
+        Remove-Item -Path $extractWorkDir -Recurse -Force -ErrorAction SilentlyContinue
+    } #>
+
+    try {
+        Expand-Archive -LiteralPath $zipPath -DestinationPath $extractDir -Force
+        Write-Host "Extraction complete."
+    }
+    catch {
+        Throw-Error ("Failed to extract archive. ZipPath='{0}', Dest='{1}'. Error='{2}'" -f $zipPath, $extractDir, $_)
+    }
+
+    $contentRoot = $extractDir
+    $topEntries = Get-ChildItem -LiteralPath $extractDir -Force | Where-Object { $_.Name -ne '__MACOSX' }
+    if ($topEntries.Count -eq 1 -and $topEntries[0].PSIsContainer) {
+        $contentRoot = $topEntries[0].FullName
+    }
+
+    Write-Host ("Moving extracted contents from '{0}' to '{1}'" -f $contentRoot, $driveRoot)
+    robocopy "$contentRoot" "$driveRoot" *.* /E /NFL /NDL /NJH /NJS /NP | Out-Null
+
+    Remove-Item -LiteralPath $zipPath -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $downloadDir -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $extractWorkDir -Recurse -Force -ErrorAction SilentlyContinue
+
+    $candidateInstallPaths = @(
+        (Join-Path (Join-Path $driveRoot 'IIS10') 'install-iis10-script.ps1'),
+        (Join-Path $driveRoot 'install-iis10-script.ps1')
+    )
+
+    $installScript = $null
+    foreach ($p in $candidateInstallPaths) {
+        if (Test-Path -LiteralPath $p) {
+            $installScript = $p
+            break
+        }
+    }
+
+    if (-not (Test-Path $installScript)) {
+        Throw-Error "Missing '$installScript'. Ensure your installer script exists."
+    }
+
+    Write-Host "Launching installer as Administrator: $installScript"
+    $args = "-ExecutionPolicy Bypass -NoProfile -File `"$installScript`""
+    Start-Process -FilePath "powershell.exe" -Verb RunAs -ArgumentList $args -Wait
+
+    Write-Host "Verifying IIS service (W3SVC) status..."
+    $svc = Get-Service -Name W3SVC -ErrorAction SilentlyContinue
+    if ($svc) {
+        if ($svc.Status -ne 'Running') {
+            try {
+                Start-Service -Name W3SVC -ErrorAction Stop
+            }
+            catch {
+                Write-Warning "Failed to start W3SVC: $($_.Exception.Message)"
+            }
+        }
+        $svc.Refresh()
+        Write-Host ("W3SVC status: {0}" -f $svc.Status) 
+    }
+    else {
+        Write-Warning "W3SVC service not found. Ensure IIS role installed successfully."
+    }
+
+    exit 0
+}
+catch {
+    Write-Error $_
+    exit 1
+}
