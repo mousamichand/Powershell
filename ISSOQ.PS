@@ -4,7 +4,7 @@ Import-Module WebAdministration -ErrorAction SilentlyContinue
 $checks = @()
 
 # Set expected Windows version
-$ExpectedWindowsVersion = "2019"  # replace with morpheus custom option var
+$ExpectedWindowsVersion = "<%=customOptions.layoutId%>"  # replace with morpheus custom option var
 
 # Get current Windows ProductName
 $winInfo = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion"
