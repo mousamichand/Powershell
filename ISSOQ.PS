@@ -4,7 +4,16 @@ Import-Module WebAdministration -ErrorAction SilentlyContinue
 $checks = @()
 
 # Set expected Windows version
-$ExpectedWindowsVersion = "<%=customOptions.layoutId%>"  # replace with morpheus custom option var
+$layoutId = "<%=customOptions.layoutId%>"
+
+# Check if it equals 2019
+# Conditional assignment
+if ($layoutId -eq 2019) {
+    $ExpectedWindowsVersion = 2019
+} else {
+    $ExpectedWindowsVersion = 2022
+}
+
 
 # Get current Windows ProductName
 $winInfo = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion"
