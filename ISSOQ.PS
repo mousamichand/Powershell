@@ -66,67 +66,67 @@ if (Get-Module -ListAvailable -Name ServerManager) {
     Import-Module ServerManager -ErrorAction SilentlyContinue
     $webMgmtInstalled = (Get-WindowsFeature Web-Mgmt-Console).Installed
 }
-
+# Verify 5.1.1	Launching IIS Administration console
 $checks += [pscustomobject]@{
-    Check  = "IIS Console"
-    Status = if ($webMgmtInstalled) { "Installed" } else { "Missing" }
+    Check  = " 5.1.1	Launching IIS Administration console  "
+    Status = if ($webMgmtInstalled) { "PASS" } else { "FAIL" }
 }
 
-# Function to safely get service status
+# 5.1.2	Verify Presence of IIS Services ,WAS and W3SVC service should be running. 
 function Get-ServiceStatusSafe {
     param([string]$ServiceName)
     $svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
     if ($svc) {
-        if ($svc.Status -eq 'Running') { return "Running" } else { return "Stopped" }
+        if ($svc.Status -eq 'Running') { return "PASS" } else { return "FAIL" }
     } else {
-        return "Not Installed"
+        return "FAIL"
     }
 }
 
 $checks += [pscustomobject]@{
-    Check  = "WAS Service"
+    Check  = " 5.1.2	IIS WAS Service is Running"
     Status = Get-ServiceStatusSafe -ServiceName "WAS"
 }
 $checks += [pscustomobject]@{
-    Check  = "W3SVC Service"
+    Check  = "5.1.2	 IIS W3SVC Service is Running"
     Status = Get-ServiceStatusSafe -ServiceName "W3SVC"
 }
 
 # -----------------------
-# .NET 4.8 Check
+#5.1.3	Presence of .Net framework V 4.8
 # -----------------------
 $net48 = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full" -ErrorAction SilentlyContinue).Release
 $checks += [pscustomobject]@{
-    Check  = ".NET 4.8"
-    Status = if ($net48 -ge 528040) { "Installed" } else { "Missing" }
+    Check  = ".Net framework V 4.8 is installed. "
+    Status = if ($net48 -ge 528040) { "PASS" } else { "FAIL" }
 }
 
 # -----------------------
-# IIS Installation Path (Registry - InstallPath)
+# 5.1.5	Presence of IIS installation path and IIS log path 
 # -----------------------
 $iisInstallReg = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\InetStp" -Name "InstallPath" -ErrorAction SilentlyContinue
 $installPath = if ($iisInstallReg -and $iisInstallReg.InstallPath) { $iisInstallReg.InstallPath } else { $null }
 
 $checks += [pscustomobject]@{
     Check  = "IIS Installation Path"
-    Status = if ($installPath -and (Test-Path $installPath)) { "Exists" } else { "Missing" }
+    Status = if ($installPath -and (Test-Path $installPath)) { "PASS" } else { "FAIL" }
     Path   = if ($installPath) { $installPath } else { "N/A" }
 }
 
 # -----------------------
-# Default Website Path (Registry - PathWWWRoot)
+# 5.1.4	Presence of default website configuration and  Default Website Path (Registry - PathWWWRoot)
 # -----------------------
 $wwwRootReg = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\InetStp" -Name "PathWWWRoot" -ErrorAction SilentlyContinue
 $wwwRootPath = if ($wwwRootReg -and $wwwRootReg.PathWWWRoot) { $wwwRootReg.PathWWWRoot } else { $null }
 
 $checks += [pscustomobject]@{
     Check  = "Default Website Path"
-    Status = if ($wwwRootPath -and (Test-Path $wwwRootPath)) { "Exists" } else { "Missing" }
+    Status = if ($wwwRootPath -and (Test-Path $wwwRootPath)) { "PASS } else { "FAIL" }
     Path   = if ($wwwRootPath) { $wwwRootPath } else { "N/A" }
 }
 
 # -----------------------
-# Default App Pool (assigned to default website)
+# 5.1.4 Presence of  Default App Pool Configuration  (assigned to default website)
 # -----------------------
 $defaultSite = Get-Website -ErrorAction SilentlyContinue | Where-Object { $_.physicalPath -eq $wwwRootPath } | Select-Object -First 1
 $appPoolName = if ($defaultSite) { $defaultSite.applicationPool } else { $null }
@@ -134,12 +134,12 @@ $appPool = if ($appPoolName) { Get-Item "IIS:\AppPools\$appPoolName" -ErrorActio
 
 $checks += [pscustomobject]@{
     Check  = "Default App Pool"
-    Status = if ($appPool) { "Present" } else { "Missing" }
+    Status = if ($appPool) { "PASS" } else { "FAIL" }
     Path   = if ($appPoolName) { $appPoolName } else { "N/A" }
 }
 
 # -----------------------
-# QUAL.HTML page accessibility
+# 5.1.6	Accessibility of default website with test page/qual page. QUAL.HTML page accessibility
 # -----------------------
 $pageUrl = "http://localhost/QUAL.HTML"
 try {
